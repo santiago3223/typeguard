@@ -666,8 +666,8 @@ def check_type(argname: str, value, expected_type, memo: Optional[_TypeCheckMemo
 
             if not isinstance(value, expected_type):
                 raise TypeError(
-                    'type of {} must be {}; got {} instead'.
-                    format(argname, qualified_name(expected_type), qualified_name(value)))
+                    '{}: type of {} must be {}; got {} instead'.
+                    format(memo.func_name.split('.')[-1] , argname, qualified_name(expected_type), qualified_name(value)))
     elif isinstance(expected_type, TypeVar):
         # Only happens on < 3.6
         check_typevar(argname, value, expected_type, memo)
