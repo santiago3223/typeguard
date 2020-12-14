@@ -617,69 +617,72 @@ def check_type(argname: str, value, expected_type, memo: Optional[_TypeCheckMemo
         (defaults to the calling frame's locals)
 
     """
-    if expected_type is Any or isinstance(value, Mock):
-        return
+    try:
+        if expected_type is Any or isinstance(value, Mock):
+            return
 
-    if expected_type is None:
-        # Only happens on < 3.6
-        expected_type = type(None)
+        if expected_type is None:
+            # Only happens on < 3.6
+            expected_type = type(None)
 
-    if memo is None:
-        frame = sys._getframe(1)
-        if globals is None:
-            globals = frame.f_globals
-        if locals is None:
-            locals = frame.f_locals
+        if memo is None:
+            frame = sys._getframe(1)
+            if globals is None:
+                globals = frame.f_globals
+            if locals is None:
+                locals = frame.f_locals
 
-        memo = _TypeCheckMemo(globals, locals)
+            memo = _TypeCheckMemo(globals, locals)
 
-    expected_type = resolve_forwardref(expected_type, memo)
-    origin_type = getattr(expected_type, '__origin__', None)
-    if origin_type is not None:
-        checker_func = origin_type_checkers.get(origin_type)
-        if checker_func:
-            checker_func(argname, value, expected_type, memo)
-        else:
-            check_type(argname, value, origin_type, memo)
-    elif isclass(expected_type):
-        if issubclass(expected_type, Tuple):
-            check_tuple(argname, value, expected_type, memo)
-        elif issubclass(expected_type, (float, complex)):
-            check_number(argname, value, expected_type)
-        elif _subclass_check_unions and issubclass(expected_type, Union):
-            check_union(argname, value, expected_type, memo)
+        expected_type = resolve_forwardref(expected_type, memo)
+        origin_type = getattr(expected_type, '__origin__', None)
+        if origin_type is not None:
+            checker_func = origin_type_checkers.get(origin_type)
+            if checker_func:
+                checker_func(argname, value, expected_type, memo)
+            else:
+                check_type(argname, value, origin_type, memo)
+        elif isclass(expected_type):
+            if issubclass(expected_type, Tuple):
+                check_tuple(argname, value, expected_type, memo)
+            elif issubclass(expected_type, (float, complex)):
+                check_number(argname, value, expected_type)
+            elif _subclass_check_unions and issubclass(expected_type, Union):
+                check_union(argname, value, expected_type, memo)
+            elif isinstance(expected_type, TypeVar):
+                check_typevar(argname, value, expected_type, memo)
+            elif issubclass(expected_type, IO):
+                check_io(argname, value, expected_type)
+            elif issubclass(expected_type, dict) and hasattr(expected_type, '__annotations__'):
+                check_typed_dict(argname, value, expected_type, memo)
+            elif getattr(expected_type, '_is_protocol', False):
+                check_protocol(argname, value, expected_type)
+            else:
+                expected_type = (getattr(expected_type, '__extra__', None) or origin_type or
+                                 expected_type)
+
+                if expected_type is bytes:
+                    # As per https://github.com/python/typing/issues/552
+                    expected_type = (bytearray, bytes)
+
+                if not isinstance(value, expected_type):
+                    raise TypeError(
+                        'type of {} must be {}; got {} instead'.
+                        format(argname, qualified_name(expected_type), qualified_name(value)))
         elif isinstance(expected_type, TypeVar):
+            # Only happens on < 3.6
             check_typevar(argname, value, expected_type, memo)
-        elif issubclass(expected_type, IO):
-            check_io(argname, value, expected_type)
-        elif issubclass(expected_type, dict) and hasattr(expected_type, '__annotations__'):
-            check_typed_dict(argname, value, expected_type, memo)
-        elif getattr(expected_type, '_is_protocol', False):
-            check_protocol(argname, value, expected_type)
-        else:
-            expected_type = (getattr(expected_type, '__extra__', None) or origin_type or
-                             expected_type)
-
-            if expected_type is bytes:
-                # As per https://github.com/python/typing/issues/552
-                expected_type = (bytearray, bytes)
-
-            if not isinstance(value, expected_type):
-                raise TypeError(
-                    '{}: type of {} must be {}; got {} instead'.
-                    format(memo.func_name.split('.')[-1] , argname, qualified_name(expected_type), qualified_name(value)))
-    elif isinstance(expected_type, TypeVar):
-        # Only happens on < 3.6
-        check_typevar(argname, value, expected_type, memo)
-    elif isinstance(expected_type, Literal.__class__):
-        # Only happens on < 3.7 when using Literal from typing_extensions
-        check_literal(argname, value, expected_type, memo)
-    elif (isfunction(expected_type) and
-            getattr(expected_type, "__module__", None) == "typing" and
-            getattr(expected_type, "__qualname__", None).startswith("NewType.") and
-            hasattr(expected_type, "__supertype__")):
-        # typing.NewType, should check against supertype (recursively)
-        return check_type(argname, value, expected_type.__supertype__, memo)
+        elif isinstance(expected_type, Literal.__class__):
+            # Only happens on < 3.7 when using Literal from typing_extensions
+            check_literal(argname, value, expected_type, memo)
+        elif (isfunction(expected_type) and
+                getattr(expected_type, "__module__", None) == "typing" and
+                getattr(expected_type, "__qualname__", None).startswith("NewType.") and
+                hasattr(expected_type, "__supertype__")):
+            # typing.NewType, should check against supertype (recursively)
+            return check_type(argname, value, expected_type.__supertype__, memo)
+    except Exception as e:
+        raise type(e)('On function "%s" ' %memo.func_name.split('.')[-1] + e.args[0])
 
 
 def check_return_type(retval, memo: Optional[_CallMemo] = None) -> bool:
